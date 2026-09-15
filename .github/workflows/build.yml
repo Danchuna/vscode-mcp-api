@@ -18,10 +18,10 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 准备 Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -45,7 +45,7 @@ jobs:
         run: npx vsce package --no-dependencies
 
       - name: 上传 VSIX 产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.meta.outputs.name }}-${{ steps.meta.outputs.version }}
           path: '*.vsix'
