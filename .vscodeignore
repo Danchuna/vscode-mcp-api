@@ -8,6 +8,7 @@ esbuild.config.js
 !out/**
 CONTEXT.md
 TESTING.md
+.github/**
 .vscode/**
 *.vsix
 .gitignore

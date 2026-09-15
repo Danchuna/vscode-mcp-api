@@ -1,8 +1,13 @@
 # vscode-mcp-api（VS Code MCP 桥接）
 
-把正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
+**中文** | [English](#english)
 
-> 本项目 基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
+> 本项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
+> This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).
+
+---
+
+把正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
 
 ## 功能特性
 
@@ -20,14 +25,14 @@
 ### 方式一：命令行安装 VSIX
 
 ```powershell
-code --install-extension "vscode-mcp-bridge-ext-0.2.8.vsix" --force
+code --install-extension "vscode-mcp-api-1.0.0.vsix" --force
 ```
 
 ### 方式二：VS Code 界面安装
 
 1. 打开扩展面板（`Ctrl+Shift+X`）
 2. 点击面板右上角 `···` → **从 VSIX 安装**
-3. 选择 `vscode-mcp-bridge-ext-0.2.8.vsix`
+3. 选择 `vscode-mcp-api-1.0.0.vsix`
 4. **重新加载窗口**（`Ctrl+Shift+P` → “重新加载窗口”）
 
 ### 验证安装
@@ -36,7 +41,7 @@ code --install-extension "vscode-mcp-bridge-ext-0.2.8.vsix" --force
 
 ```powershell
 curl http://127.0.0.1:3333/health
-# {"status":"ok","version":"0.2.8","connectedAgents":0,"port":3333}
+# {"status":"ok","version":"1.0.0","connectedAgents":0,"port":3333}
 ```
 
 > 端口默认 3333，如被占用会自动尝试 3333–3337。
@@ -163,10 +168,186 @@ https://xxxx-xxxx-xxxx.trycloudflare.com/mcp
 
 ```bash
 npm install
-npm run typecheck      # 类型检查
-npm run build           # esbuild 打包到 out/extension.js
-npx vsce package --no-dependencies   # 生成 VSIX
+npm run typecheck                  # 类型检查
+npm run build                      # esbuild 打包到 out/extension.js
+npx vsce package --no-dependencies # 生成 VSIX
 ```
 
 ---
-本项目 基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
+
+<a id="english"></a>
+
+# vscode-mcp-api (VS Code MCP Bridge)
+
+[中文](#vscode-mcp-apivs-code-mcp-桥接) | **English**
+
+Expose your **running VS Code instance** to AI agents over MCP (Model Context Protocol): agents can read and write files, inspect LSP diagnostics, run terminal commands, work with git, and refactor — as if they were sitting at your computer.
+
+## Features
+
+- **27 MCP tools**: file I/O, visual diff, LSP (diagnostics / definition / references / hover / symbols), workspace-wide refactoring, terminal management, git status and more
+- **Dual transport endpoints**: `/sse` (classic SSE for local use) and `/mcp` (stateless Streamable HTTP, recommended for remote or proxied setups)
+- **Built-in Cloudflare tunnel**: expose your local VS Code to the public internet (trycloudflare.com) with one click, so web-based or remote agents can connect
+- **MCP Bridge Panel**: shows the current public URL in a real input box (auto-refreshing) with one-click buttons to copy the URL or the starter prompt
+- **Optional Bearer token auth** and a command allowlist to control the attack surface
+- Starts automatically with VS Code — no manual startup needed
+
+---
+
+## Installation
+
+### Option 1: Install the VSIX from the command line
+
+```powershell
+code --install-extension "vscode-mcp-api-1.0.0.vsix" --force
+```
+
+### Option 2: Install from the VS Code UI
+
+1. Open the Extensions view (`Ctrl+Shift+X`)
+2. Click `···` in the top-right corner → **Install from VSIX...**
+3. Select `vscode-mcp-api-1.0.0.vsix`
+4. **Reload the window** (`Ctrl+Shift+P` → "Reload Window")
+
+### Verify the installation
+
+After reloading, `MCP :3333` appears in the status bar. You can also run a health check:
+
+```powershell
+curl http://127.0.0.1:3333/health
+# {"status":"ok","version":"1.0.0","connectedAgents":0,"port":3333}
+```
+
+> The default port is 3333. If it is taken, ports 3333–3337 are tried automatically.
+
+---
+
+## Usage 1: Local agents (same machine)
+
+Configure your local MCP client (Claude Code, Cline, or any MCP-capable tool):
+
+| Endpoint | URL | Notes |
+|---|---|---|
+| Streamable HTTP (recommended) | `http://127.0.0.1:3333/mcp` | Pure request-response, best compatibility |
+| SSE (classic) | `http://127.0.0.1:3333/sse` | Legacy transport, also works locally |
+
+Example config (`~/.claude/mcp.json` or any client supporting `mcpServers`):
+
+```json
+{
+  "mcpServers": {
+    "vscode": {
+      "url": "http://127.0.0.1:3333/mcp"
+    }
+  }
+}
+```
+
+Then tell the agent "connect to the MCP server and list available tools" — all 27 tools will show up.
+
+## Usage 2: Remote agents (web UI / another machine)
+
+1. **Start the public tunnel** (pick one):
+   - Enable `mcpServer.enableCloudflareTunnel` in settings (starts with the server)
+   - Click the "Public Tunnel" button in the status bar
+   - Run "VS Code MCP Bridge: Start/Stop Public Tunnel" from the command palette
+2. On first use you need `cloudflared`; the extension offers automatic `winget` install or a direct download link
+3. Once the tunnel is up, a notification appears — click **"Open Panel"** on it
+4. In the MCP Bridge Panel, click **"📋 Copy Starter Prompt"**:
+
+```
+https://xxxx-xxxx-xxxx.trycloudflare.com/mcp
+
+Please connect to this MCP server, learn which tools it provides, and use those MCP tools for everything in this conversation.
+```
+
+5. Paste that text to the remote agent (web chat, a model on another machine) and it will connect
+
+> **⚠️ Always use the `/mcp` endpoint remotely.** Some networks (including certain Cloudflare tunnel routes) buffer SSE response bodies, so `/sse` returns 200 but no `endpoint` event ever arrives. `/mcp` is stateless request-response and traverses fine.
+
+> **Note:** the temporary tunnel URL changes on every restart (window reload / reboot / tunnel restart). Always use the URL currently shown in the MCP Bridge Panel.
+
+### Opening the MCP Bridge Panel
+
+- Run "VS Code MCP Bridge: Open Management Panel" from the command palette
+- Click `MCP :3333` in the status bar → "Open Management Panel"
+- Click "Open Panel" on the tunnel notification
+
+The panel shows server/tunnel status, the public URL (auto-refreshing), buttons to copy the URL or the starter prompt, and local URL copy.
+
+---
+
+## Settings
+
+Search for `mcpServer` in VS Code settings:
+
+| Setting | Default | Description |
+|---|---|---|
+| `mcpServer.port` | `3333` | HTTP port (auto-increments through 3333–3337 if taken) |
+| `mcpServer.authToken` | empty | HTTP Bearer token; empty means no auth |
+| `mcpServer.enableContextPush` | `true` | Push active file / selection / diagnostics to connected agents |
+| `mcpServer.enableCloudflareTunnel` | `false` | Start the public tunnel automatically with the server |
+| `mcpServer.terminalStrategy` | `childProcess` | How terminal commands run (`childProcess` captures output reliably / `shellIntegration` shows them in the terminal panel) |
+| `mcpServer.allowedCommands` | `[]` | Allowlist of VS Code commands for `execute_vscode_command` (empty = all denied) |
+
+## All commands
+
+| Command | Description |
+|---|---|
+| VS Code MCP Bridge: Start Server | Start the local HTTP server |
+| VS Code MCP Bridge: Stop Server | Stop server and tunnel |
+| VS Code MCP Bridge: Restart Server | Restart |
+| VS Code MCP Bridge: Copy Connection URL | Copy the local `/sse` URL |
+| VS Code MCP Bridge: Start/Stop Public Tunnel | Toggle the public tunnel |
+| VS Code MCP Bridge: Show/Copy Public URL | Show the current public URL, press Enter to copy |
+| VS Code MCP Bridge: Copy Starter Prompt | Copy "URL + instructions" prompt |
+| VS Code MCP Bridge: Open Management Panel | Open the MCP Bridge Panel |
+| VS Code MCP Bridge: Show Status / Options | Status bar menu |
+
+---
+
+## Tool list (27 tools)
+
+| Category | Tools |
+|---|---|
+| Context awareness | `get_active_file` `get_selection` `get_open_tabs` `get_diagnostics` `get_workspace_info` |
+| File operations | `read_file` `write_file` `create_file` `delete_file` `open_file` `close_file` `show_diff` (visual diff preview before writing) |
+| LSP navigation | `go_to_definition` `find_references` `get_hover` `get_document_symbols` `search_workspace_symbols` |
+| Refactor / quick fix | `get_code_actions` `apply_code_action` `rename_symbol` |
+| Terminal (short commands) | `run_terminal_command` (with timeout, captures output) |
+| Terminal (long-running) | `spawn_terminal` `list_terminals` `read_terminal` `write_terminal` `kill_terminal` |
+| Misc | `execute_vscode_command` (allowlist required) |
+
+## Security notes
+
+- **Public tunnel + no auth = anyone with the URL can control your VS Code** (including running terminal commands). Always set `mcpServer.authToken` and send the header from the remote client: `"Authorization": "Bearer <your-token>"`
+- `execute_vscode_command` denies everything by default; only commands in `allowedCommands` run
+- The temporary tunnel URL is a random phrase, but leaking it means handing over control — never share it publicly
+
+## FAQ
+
+**Q: `/sse` returns 200 remotely but the `endpoint` event never arrives?**
+The tunnel buffers the SSE body. Use the `/mcp` endpoint remotely (stateless request-response). Both endpoints work locally.
+
+**Q: My tunnel URL changed and the old one stopped working?**
+Temporary tunnels (trycloudflare.com) generate a new random URL on every start. Open the MCP Bridge Panel and copy the latest one.
+
+**Q: Where are the logs?**
+Open the Output panel (`Ctrl+Shift+U`) and pick the "MCP 桥接" channel — it has detailed server, tunnel, and tool-call logs.
+
+**Q: The port is already in use?**
+It auto-increments through 3333–3337; the `port` field in `/health` shows the actual port.
+
+## Build from source
+
+```bash
+npm install
+npm run typecheck                  # type check
+npm run build                      # bundle to out/extension.js with esbuild
+npx vsce package --no-dependencies # produce the VSIX
+```
+
+---
+
+本项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
+This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).

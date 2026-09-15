@@ -1,8 +1,8 @@
 {
-  "name": "vscode-mcp-bridge-ext",
+  "name": "vscode-mcp-api",
   "displayName": "VS Code MCP 桥接",
   "description": "通过 MCP 将 VS Code IDE 的能力桥接给 AI 编程智能体",
-  "version": "0.2.8",
+  "version": "1.0.0",
   "publisher": "jhamama",
   "private": true,
   "engines": {

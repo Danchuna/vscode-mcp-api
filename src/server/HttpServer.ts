@@ -117,7 +117,7 @@ export class HttpServer {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         status: 'ok',
-        version: '0.2.8',
+        version: __EXT_VERSION__,
         connectedAgents: this.sessions.size,
         port: this.actualPort,
       }))
@@ -257,7 +257,7 @@ export class HttpServer {
   /** 每个连接/请求创建一个 McpServer 实例（SDK 设计要求），/sse 与 /mcp 共用同一套工具注册 */
   private createMcpServer(): McpServer {
     const mcpServer = new McpServer(
-      { name: 'vscode-mcp-bridge', version: '0.2.8' },
+      { name: 'vscode-mcp-bridge', version: __EXT_VERSION__ },
       { instructions: MCP_INSTRUCTIONS },
     )
     registerTools(mcpServer, this.bridge, this.settings, this.terminalManager)
