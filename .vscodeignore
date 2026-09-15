@@ -1,0 +1,15 @@
+src/**
+node_modules/**
+.eslintrc.json
+tsconfig.json
+esbuild.config.js
+**/*.map
+**/*.ts
+!out/**
+CONTEXT.md
+TESTING.md
+.vscode/**
+*.vsix
+.gitignore
+.mcp.json
+.claude/**
