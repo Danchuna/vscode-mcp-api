@@ -10,8 +10,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jhamama/vscode-mcp-bridge"
+    "url": "https://github.com/Danchuna/vscode-mcp-api"
   },
+  "license": "MIT",
   "categories": [
     "Other"
   ],
