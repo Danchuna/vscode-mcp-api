@@ -1,15 +1,17 @@
-# vscode-mcp-api（VS Code MCP 桥接）
+#vscode-mcp-api 让你的网页版AI调用本地工具（VS Code MCP 桥接）
+> bilibili视频教程 https://www.bilibili.com/video/BV1FMeW6RE1J
 
-**中文** | [English](#english)
 
-> 本项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
+**中文** | [English]（#英语")"
+
+> 本项目基于开源项目 [vscode-mcp-bridge“")"”（https://github.com/jhamama/vscode-mcp-bridge) 完成。
 > This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).
 
 ---
 
 把正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
 
-## 功能特性
+##功能特性
 
 - **27 个 MCP 工具**：文件读写、可视化 Diff、LSP（诊断/定义/引用/悬停/符号）、全工作区重构、终端管理、git 状态等
 - **双传输端点**：`/sse`（本地经典 SSE）+ `/mcp`（Streamable HTTP 无状态，远程/代理环境推荐）
@@ -20,20 +22,20 @@
 
 ---
 
-## 安装
+##安装
 
-### 方式一：命令行安装 VSIX
+###方式一：命令行安装 VSIX
 
-```powershell
-code --install-extension "vscode-mcp-api-1.0.0.vsix" --force
-```
+```“PowerShell”```
+“```”vscode-mcp-api-1.0.0.vsix`
+点击面板右上角的 `` → **从 VSIX 安装**
 
-### 方式二：VS Code 界面安装
+### 方法二：VS Code 界面安装
 
-1. 打开扩展面板（`Ctrl+Shift+X`）
-2. 点击面板右上角 `···` → **从 VSIX 安装**
-3. 选择 `vscode-mcp-api-1.0.0.vsix`
-4. **重新加载窗口**（`Ctrl+Shift+P` → “重新加载窗口”）
+
+点击面板右上角的“→ **从 VSIX 安装**”
+`vscode-mcp-api-1.0.0.vsix`
+4. **重新加载窗口**（`4. **重新加载窗口**（`Ctrl+Shift+P → “重新加载窗口”） → “重新加载窗口”）
 
 ### 验证安装
 
