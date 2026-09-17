@@ -1,49 +1,51 @@
 #vscode-mcp-api 让你的网页版AI调用本地工具（VS Code MCP 桥接）
+
 > bilibili视频教程 https://www.bilibili.com/video/BV1FMeW6RE1J
-> 用户QQ交流群 611067889
-> 注意！所有可以调用MCP的AI都可以使用本插件 本插件持续更新中。开源不易点个Star呗。
+> 用户 QQ 交流群：611067889
+> 注意！所有能够调用 MCP 的 AI 都可以使用本插件，本插件正在持续更新中。开源不易，请点个 Star 支持。
 
-**中文** | [English](#英语")
 
-> 本项目基于开源项目 [vscode-mcp-bridge“\")\"”（https://github.com/jhamama/vscode-mcp-bridge）完成。
-> 该项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge)。
 
-“---”
+**中文** | [English]（#英语")"
 
-将正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
+> 本项目基于开源项目 [vscode-mcp-bridge“")"”（https://github.com/jhamama/vscode-mcp-bridge) 完成。
+> This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).
+
+---
+
+把正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
 
 ##功能特性
 
-- **27个MCP工具**：文件读写、可视化Diff、LSP（诊断/定义/引用/悬停/符号）、全工作区重构、终端管理、git状态等
+- **27 个 MCP 工具**：文件读写、可视化 Diff、LSP（诊断/定义/引用/悬停/符号）、全工作区重构、终端管理、git 状态等
 - **双传输端点**：`/sse`（本地经典 SSE）+ `/mcp`（Streamable HTTP 无状态，远程/代理环境推荐）
-—内置 cloudflared 外网隧道：一键将本机 VS Code 暴露到公网（trycloudflare.com），以便网页版或其他电脑上的智能体接入
+- **内置 cloudflared 外网隧道**：一键把本机 VS Code 暴露到公网（trycloudflare.com），让网页版/其它电脑上的智能体接入
 - **「MCP 桥接面板」**：真实输入框显示当前外网地址（自动刷新），真按钮一键复制地址 / 复制关键提示词
 - **可选 Bearer Token 鉴权**与命令白名单，控制访问面
-- 扩展随 VS Code 启动自动运行，无需手动启用
+- 扩展随 VS Code 启动自动运行，无需手动开启
 
-“---”
+---
 
 ##安装
 
 ###方式一：命令行安装 VSIX
 
-“PowerShell”
-"```"vscode-mcp-api-1.0.0.vsx""
-点击面板右上角的 “→ **从 VSIX 安装**”
+```“PowerShell”```
+“```”vscode-mcp-api-1.0.0.vsix`
+点击面板右上角的 `` → **从 VSIX 安装**
 
-### 方法二：通过 VS Code 界面安装
+### 方法二：VS Code 界面安装
 
 
 点击面板右上角的“→ **从 VSIX 安装**”
-``vscode-mcp-api-1.0.0.vsix``
+`vscode-mcp-api-1.0.0.vsix`
 4. **重新加载窗口**（`4. **重新加载窗口**（`Ctrl+Shift+P → “重新加载窗口”） → “重新加载窗口”）
 
-<验证安装>  
-###
+### 验证安装
 
 窗口重载后，右下角状态栏会出现 `MCP :3333` 字样；也可以执行健康检查：
 
-```powershell```
+```powershell
 curl http://127.0.0.1:3333/health
 # {"status":"ok","version":"1.0.0","connectedAgents":0,"port":3333}
 ```
@@ -312,46 +314,46 @@ Search for `mcpServer` in VS Code settings:
 
 ## Tool list (27 tools)
 
-| Category | Tools |
+|分类|工具|
 |---|---|
-| Context awareness | `get_active_file` `get_selection` `get_open_tabs` `get_diagnostics` `get_workspace_info` |
-| File operations | `read_file` `write_file` `create_file` `delete_file` `open_file` `close_file` `show_diff` (visual diff preview before writing) |
-| LSP navigation | `go_to_definition` `find_references` `get_hover` `get_document_symbols` `search_workspace_symbols` |
-| Refactor / quick fix | `get_code_actions` `apply_code_action` `rename_symbol` |
-| Terminal (short commands) | `run_terminal_command` (with timeout, captures output) |
-| Terminal (long-running) | `spawn_terminal` `list_terminals` `read_terminal` `write_terminal` `kill_terminal` |
-| Misc | `execute_vscode_command` (allowlist required) |
+|上下文感知 | `get_active_file` `get_selection` `get_open_tabs` `get_diagnostics` `get_workspace_info` |
+|文件操作 | `read_file` `write_file` `create_file` `delete_file` `open_file` `close_file` `show_diff`（写入前的可视化差异预览）|
+|LSP 导航 | `go_to_definition` `find_references` `get_hover` `get_document_symbols` `search_workspace_symbols` |
+|重构 / 快速修复 | `get_code_actions` `apply_code_action` `rename_symbol` |
+|终端（短命令） | `run_terminal_command`（带超时，捕获输出）|
+|终端（长运行命令） | `spawn_terminal` `list_terminals` `read_terminal` `write_terminal` `kill_terminal` |
+| 杂项 | `execute_vscode_command` (需要白名单) |
 
-## Security notes
+##安全说明
 
-- **Public tunnel + no auth = anyone with the URL can control your VS Code** (including running terminal commands). Always set `mcpServer.authToken` and send the header from the remote client: `"Authorization": "Bearer <your-token>"`
-- `execute_vscode_command` denies everything by default; only commands in `allowedCommands` run
-- The temporary tunnel URL is a random phrase, but leaking it means handing over control — never share it publicly
+<0>- <1>**<2>公共隧道 + 无认证 = 任何人只要有了 URL，就可以控制你的 VS Code<3>**（包括运行终端命令）。一定要设置 <4>`<5>mcpServer.authToken<6>`，并从远程客户端发送以下标头：<7>`<8>"Authorization": "Bearer "<9>`
+`- `execute_vscode_command` 默认情况下会拒绝所有请求；只有 ``allowedCommands` 中的命令才会被执行。
+- 临时隧道 URL 是一个随机短语，但泄露它意味着交出控制权——切勿公开分享。
 
-## FAQ
+## 常见问题解答
 
-**Q: `/sse` returns 200 remotely but the `endpoint` event never arrives?**
-The tunnel buffers the SSE body. Use the `/mcp` endpoint remotely (stateless request-response). Both endpoints work locally.
+**为什么远程调用 `/sse` 返回了 200，但 `endpoint` 事件从未到达？**
+“隧道缓冲SSE主体。使用`/mcp`端点进行远程（无状态请求-响应）调用。两个端点均可本地工作。”
 
-**Q: My tunnel URL changed and the old one stopped working?**
-Temporary tunnels (trycloudflare.com) generate a new random URL on every start. Open the MCP Bridge Panel and copy the latest one.
+**问：我的隧道 URL 变了，旧的不能用了？**
+临时隧道（trycloudflare.com）每次启动都会生成一个新的随机 URL。打开 MCP 桥接面板，复制最新的 URL。
 
-**Q: Where are the logs?**
-Open the Output panel (`Ctrl+Shift+U`) and pick the "MCP 桥接" channel — it has detailed server, tunnel, and tool-call logs.
+**问：日志在哪里？**
+打开输出面板（`Ctrl+Shift+U`），选择“MCP 桥接”频道——其中包含详细的服务器、隧道和工具调用日志。
 
-**Q: The port is already in use?**
-It auto-increments through 3333–3337; the `port` field in `/health` shows the actual port.
+**问：端口已被占用？**
+它会自动递增到 3333–3337； 端口 ` 字段在 ` /health ` 中显示实际端口。
 
-## Build from source
+## 从源代码构建
 
 ```bash
 npm install
-npm run typecheck                  # type check
-npm run build                      # bundle to out/extension.js with esbuild
-npx vsce package --no-dependencies # produce the VSIX
-```
+运行 npm typecheck 以进行类型检查
+运行 npm run build，使用 esbuild 将代码打包到 out/extension.js 中
+npx vsce package --no-dependencies # 生成 VSIX 文件
+“```”
 
----
+“---”
 
-本项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge) 完成。
-This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).
+本项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge)完成。
+This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge)."
