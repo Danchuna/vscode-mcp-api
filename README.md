@@ -1,47 +1,49 @@
 #vscode-mcp-api 让你的网页版AI调用本地工具（VS Code MCP 桥接）
 > bilibili视频教程 https://www.bilibili.com/video/BV1FMeW6RE1J
+> 用户QQ交流群 611067889
+> 注意！所有可以调用MCP的AI都可以使用本插件 本插件持续更新中。开源不易点个Star呗。
 
+**中文** | [English](#英语")
 
-**中文** | [English]（#英语")"
+> 本项目基于开源项目 [vscode-mcp-bridge“\")\"”（https://github.com/jhamama/vscode-mcp-bridge）完成。
+> 该项目基于开源项目 [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge)。
 
-> 本项目基于开源项目 [vscode-mcp-bridge“")"”（https://github.com/jhamama/vscode-mcp-bridge) 完成。
-> This project is based on the open-source project [vscode-mcp-bridge](https://github.com/jhamama/vscode-mcp-bridge).
+“---”
 
----
-
-把正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
+将正在运行的 **VS Code 实例**通过 MCP（Model Context Protocol）暴露给 AI 智能体：智能体可以读写文件、查看 LSP 诊断、执行终端命令、操作 git、进行重构——就像坐在你电脑前一样。
 
 ##功能特性
 
-- **27 个 MCP 工具**：文件读写、可视化 Diff、LSP（诊断/定义/引用/悬停/符号）、全工作区重构、终端管理、git 状态等
+- **27个MCP工具**：文件读写、可视化Diff、LSP（诊断/定义/引用/悬停/符号）、全工作区重构、终端管理、git状态等
 - **双传输端点**：`/sse`（本地经典 SSE）+ `/mcp`（Streamable HTTP 无状态，远程/代理环境推荐）
-- **内置 cloudflared 外网隧道**：一键把本机 VS Code 暴露到公网（trycloudflare.com），让网页版/其它电脑上的智能体接入
+—内置 cloudflared 外网隧道：一键将本机 VS Code 暴露到公网（trycloudflare.com），以便网页版或其他电脑上的智能体接入
 - **「MCP 桥接面板」**：真实输入框显示当前外网地址（自动刷新），真按钮一键复制地址 / 复制关键提示词
 - **可选 Bearer Token 鉴权**与命令白名单，控制访问面
-- 扩展随 VS Code 启动自动运行，无需手动开启
+- 扩展随 VS Code 启动自动运行，无需手动启用
 
----
+“---”
 
 ##安装
 
 ###方式一：命令行安装 VSIX
 
-```“PowerShell”```
-“```”vscode-mcp-api-1.0.0.vsix`
-点击面板右上角的 `` → **从 VSIX 安装**
+“PowerShell”
+"```"vscode-mcp-api-1.0.0.vsx""
+点击面板右上角的 “→ **从 VSIX 安装**”
 
-### 方法二：VS Code 界面安装
+### 方法二：通过 VS Code 界面安装
 
 
 点击面板右上角的“→ **从 VSIX 安装**”
-`vscode-mcp-api-1.0.0.vsix`
+``vscode-mcp-api-1.0.0.vsix``
 4. **重新加载窗口**（`4. **重新加载窗口**（`Ctrl+Shift+P → “重新加载窗口”） → “重新加载窗口”）
 
-### 验证安装
+<验证安装>  
+###
 
 窗口重载后，右下角状态栏会出现 `MCP :3333` 字样；也可以执行健康检查：
 
-```powershell
+```powershell```
 curl http://127.0.0.1:3333/health
 # {"status":"ok","version":"1.0.0","connectedAgents":0,"port":3333}
 ```
