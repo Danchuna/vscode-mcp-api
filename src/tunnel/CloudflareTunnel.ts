@@ -67,10 +67,18 @@ export class CloudflareTunnel {
   }
 
   /**
-   * 启动 cloudflared 临时（quick）隧道，返回公网根地址。
-   * 地址从 cloudflared 输出中解析；超时未获取到则终止进程并抛错。
+   * 启动隧道，返回公网根地址。三种模式（优先级从上到下）：
+   *
+   * 1. 令牌隧道（opts.token + opts.hostname）—— 推荐用于「一人一个固定地址」的分发场景：
+   *    运行 `cloudflared tunnel run --token <token>`。隧道由发号方（你的 Cloudflare 账号）
+   *    预先创建并配置好公网入口，用户端无需登录、无需 Cloudflare 账号、无需域名，
+   *    公网地址永久固定为 https://<hostname>。
+   * 2. 命名隧道（opts.name + opts.hostname）：运行 `cloudflared tunnel run <name>`，
+   *    需要用户自己完成 cloudflared tunnel login / create / route dns 并配好 config.yml，
+   *    公网地址固定为 https://<hostname>。
+   * 3. 临时隧道（默认）：trycloudflare.com 快速隧道，地址每次启动随机生成、无法固定。
    */
-  async start(port: number): Promise<string> {
+  async start(port: number, opts: { name?: string; hostname?: string; token?: string } = {}): Promise<string> {
     if (this.proc) this.stop()
 
     const bin = resolveCloudflared()
@@ -79,16 +87,38 @@ export class CloudflareTunnel {
       throw new CloudflaredNotInstalledError()
     }
 
-    log.info('隧道', `正在启动 cloudflared 临时隧道（本地端口 ${port}）...`)
+    const name = opts.name?.trim() ?? ''
+    const hostname = opts.hostname?.trim() ?? ''
+    const token = opts.token?.trim() ?? ''
+    const isToken = !!token
+    const isNamed = !isToken && !!(name && hostname)
 
-    const proc = spawn(
-      bin,
-      // --protocol http2：QUIC(UDP) 在部分网络（尤其国内）会被丢弃，导致边缘连接失败、公网访问 530；固定走 TCP 兼容性最好
-      ['tunnel', '--url', `http://127.0.0.1:${port}`, '--protocol', 'http2', '--no-autoupdate'],
-      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
-    )
+    // 令牌/命名隧道的公网地址由发号方在 Cloudflare 侧配置，无法从 cloudflared 输出推断，必须显式提供
+    if ((isToken || isNamed) && !hostname) {
+      throw new Error(
+        isToken
+          ? '已设置 mcpServer.tunnelToken，但缺少 mcpServer.tunnelHostname：令牌隧道的公网地址无法自动推断，请填写发号方给你的固定域名'
+          : '已设置 mcpServer.tunnelName，但缺少 mcpServer.tunnelHostname：请填写命名隧道绑定的固定域名',
+      )
+    }
+
+    // --no-autoupdate 是 cloudflared 全局参数，放在最前避免与 run 子命令的参数解析冲突
+    const args = isToken
+      ? ['--no-autoupdate', 'tunnel', 'run', '--token', token]
+      : isNamed
+        ? ['--no-autoupdate', 'tunnel', 'run', name]
+        : // --protocol http2：QUIC(UDP) 在部分网络（尤其国内）会被丢弃，导致边缘连接失败、公网访问 530；固定走 TCP 兼容性最好
+          ['tunnel', '--url', `http://127.0.0.1:${port}`, '--protocol', 'http2', '--no-autoupdate']
+
+    log.info('隧道', isToken
+      ? `正在启动令牌隧道（本地端口 ${port}，固定域名 ${hostname}）...`
+      : isNamed
+        ? `正在启动命名隧道 ${name}（本地端口 ${port}，固定域名 ${hostname}）...`
+        : `正在启动 cloudflared 临时隧道（本地端口 ${port}）...`)
+
+    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     this.proc = proc
-    this._url = null
+    this._url = isToken || isNamed ? `https://${hostname}` : null
 
     return await new Promise<string>((resolve, reject) => {
       let settled = false
@@ -101,13 +131,19 @@ export class CloudflareTunnel {
         fn()
       }
 
+      // 令牌等同凭据：所有 cloudflared 输出先脱敏再进日志，避免令牌被记录
+      const redact = (text: string) => (token ? text.split(token).join('***') : text)
+
       const feed = (chunk: Buffer) => {
         for (const line of chunk.toString('utf-8').split(/\r?\n/)) {
-          const m = line.match(URL_RE)
-          if (m && !this._url) {
-            this._url = m[0]
-            log.info('隧道', `外网地址：${this._url}`)
-            finish(() => resolve(this._url as string))
+          if (line.trim()) log.info('隧道', redact(line.trim()))
+          if (!isToken && !isNamed) {
+            const m = line.match(URL_RE)
+            if (m && !this._url) {
+              this._url = m[0]
+              log.info('隧道', `外网地址：${this._url}`)
+              finish(() => resolve(this._url as string))
+            }
           }
         }
       }
@@ -115,12 +151,14 @@ export class CloudflareTunnel {
       proc.stderr?.on('data', feed)
 
       proc.on('error', (err: NodeJS.ErrnoException) => {
-        log.error('隧道', 'cloudflared 启动失败', err.message)
+        const message = redact(err.message)
+        log.error('隧道', 'cloudflared 启动失败', message)
         this.proc = null
+        this._url = null
         finish(() => reject(
           err.code === 'ENOENT'
             ? new CloudflaredNotInstalledError()
-            : new Error(`cloudflared 启动失败：${err.message}`),
+            : new Error(`cloudflared 启动失败：${message}`),
         ))
       })
 
@@ -128,23 +166,35 @@ export class CloudflareTunnel {
         const killedByUs = this.killed.has(proc)
         this.killed.delete(proc)
         this.proc = null
+        this._url = null
         if (!settled) {
           finish(() => reject(
             killedByUs
               ? new TunnelAbortedError()
-              : new Error(`cloudflared 提前退出（退出码 ${code}）`),
+              : new Error(
+                  isToken
+                    ? `令牌隧道启动失败（退出码 ${code}）：请确认 mcpServer.tunnelToken 有效（令牌失效需向发号方重新索取），且 mcpServer.tunnelHostname 与隧道配置一致`
+                    : isNamed
+                      ? `命名隧道 ${name} 启动失败（退出码 ${code}）：请确认已在 ~/.cloudflared 完成 cloudflared tunnel login / create / route dns 配置`
+                      : `cloudflared 提前退出（退出码 ${code}）`,
+                ),
           ))
         } else {
           log.info('隧道', `cloudflared 进程已退出（退出码 ${code}${killedByUs ? '，主动停止' : ''}）`)
         }
       })
 
-      timer = setTimeout(() => {
-        finish(() => {
-          this.stop()
-          reject(new Error(`等待外网地址超时（${URL_TIMEOUT_MS / 1000} 秒），请检查网络或代理设置`))
-        })
-      }, URL_TIMEOUT_MS)
+      if (isToken || isNamed) {
+        // 公网地址由配置决定、已知，等待一小段时间确认进程稳定（令牌/配置无效时 cloudflared 会快速退出）
+        timer = setTimeout(() => finish(() => resolve(this._url as string)), 2000)
+      } else {
+        timer = setTimeout(() => {
+          finish(() => {
+            this.stop()
+            reject(new Error(`等待外网地址超时（${URL_TIMEOUT_MS / 1000} 秒），请检查网络或代理设置`))
+          })
+        }, URL_TIMEOUT_MS)
+      }
     })
   }
 

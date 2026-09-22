@@ -5,10 +5,11 @@ A VS Code extension that hosts an MCP (Model Context Protocol) HTTP server, expo
 
 ## Current Status
 - Extension is fully built and working
-- Installed in Julian's current VS Code instance via VSIX
-- Server runs on `http://127.0.0.1:3333`
-- All 23 tools tested and confirmed working
-- LSP diagnostics confirmed working (caught a `useAuth` TS error in $slug.tsx)
+- Installed locally via VSIX for development and testing
+- Server runs on `http://127.0.0.1:3333` (port is pinned by default — the address stays stable across restarts; a busy port now raises a clear error with the offending PID instead of silently drifting)
+- Public tunnel: trycloudflare quick tunnels change URL every start (anonymous temporary tunnels — cannot be pinned in code). For a fixed public URL there are two supported modes: (a) **token tunnel** — the scalable option for distributing to hundreds of users, since the user needs no Cloudflare account, no domain and no login; the author owns one domain/account and issues one tunnel token per user. The token is stored in the **OS credential store** (command "Set Tunnel Token") or in an out-of-repo file referenced by `mcpServer.tunnelTokenFile`, and paired with `mcpServer.tunnelHostname`. It is deliberately **not** a settings field, so it can never be committed or Settings-Synced; cloudflared output is redacted before logging. (b) named tunnel (`mcpServer.tunnelName` + `mcpServer.tunnelHostname`) — user-managed, requires their own `cloudflared tunnel login / create / route dns`. (c) **localtunnel** (`mcpServer.tunnelProvider=localtunnel`) — zero account, zero domain, no cloudflared install; gives a fixed `https://<subdomain>.loca.lt/mcp`. loca.lt subdomains cannot be reserved, so the extension auto-generates an unguessable random subdomain persisted in `globalState` (stable across restarts, impractical to hijack). Measured end-to-end from a real network: GET and POST both return 200 with no interstitial. Also measured: `*.workers.dev` is **SNI-blocked** in mainland China (it fails even when DNS is bypassed via `--resolve` to a real Cloudflare edge IP, while the same IP returns 200 with a `cloudflare.com` SNI), so the workers.dev relay idea was rejected; `vercel.app` / `fly.dev` / `onrender.com` / `ngrok.io` / `cpolar.top` / `vicp.net` also timed out, while `loca.lt` / `serveo.net` / `ngrok-free.app` / `devtunnels.ms` / `pages.dev` are reachable
+- All 27 tools tested and confirmed working
+- LSP diagnostics confirmed working (caught a real TypeScript error during testing)
 - Visual diff confirmed working via `show_diff` tool (opens native VS Code diff editor before writing)
 - Claude Code connected via `~/.claude/mcp.json`
 
@@ -24,7 +25,7 @@ A VS Code extension that hosts an MCP (Model Context Protocol) HTTP server, expo
 }
 ```
 
-## Tools Exposed (23 total)
+## Tools Exposed (27 total)
 - `get_active_file` - current file path, content, language
 - `get_selection` - current selection + cursor position
 - `get_open_tabs` - all open tabs
@@ -50,10 +51,13 @@ vscode-mcp/
     extension.ts          # Entry point, activate/deactivate
     bridge/VsCodeBridge.ts # All VS Code API access
     server/HttpServer.ts   # HTTP + SSE transport
-    tools/index.ts         # All 23 MCP tools registered here
+    tools/index.ts         # All 27 MCP tools registered here
     context/ContextPusher.ts # Auto-push events to agents
     config/Settings.ts     # VS Code settings wrapper
+    tunnel/CloudflareTunnel.ts  # cloudflared 隧道（临时/令牌/命名）
+    tunnel/LocaltunnelTunnel.ts # localtunnel（loca.lt）隧道
     types/git.d.ts         # Git extension type defs
+    types/localtunnel.d.ts # localtunnel 类型声明
   .vscode/
     launch.json            # F5 dev mode config
     tasks.json             # Build task
@@ -74,11 +78,8 @@ vscode-mcp/
 - Terminal commands run via `child_process.exec` by default (captures output)
 
 ## What's Left To Do
-- Add an `icon.png` (128x128px) for marketplace listing
-- Create GitHub repo and push (gh CLI not installed, needs `brew install gh`)
-- Update `package.json` repository URL to actual GitHub URL once created
-- Publish to VS Code Marketplace (needs Microsoft publisher account + PAT)
-- The `"publisher": "jhamama"` in package.json needs to match the actual marketplace publisher ID
+- Publish to the VS Code Marketplace (needs a Microsoft publisher account + PAT)
+- The `"publisher"` field in package.json must match the actual marketplace publisher ID
 
 ## How to Rebuild & Reinstall After Moving
 ```bash

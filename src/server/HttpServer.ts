@@ -1,4 +1,5 @@
 import * as http from 'http'
+import { execFile } from 'child_process'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -48,6 +49,56 @@ interface SessionEntry {
   unsubscribePush: () => void
 }
 
+/** 固定端口被占用：携带占用方信息，让上层提示用户处理，而不是悄悄换端口 */
+export class PortInUseError extends Error {
+  constructor(
+    public readonly port: number,
+    public readonly owner: string,
+  ) {
+    super(`端口 ${port} 已被 ${owner} 占用`)
+    this.name = 'PortInUseError'
+  }
+}
+
+/** 执行子进程并返回 stdout（失败返回 null，避免干扰主流程） */
+function runCapture(cmd: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { windowsHide: true, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      resolve(err ? null : stdout)
+    })
+  })
+}
+
+/** 找出占用某端口的进程描述（尽力而为，失败返回「未知进程」） */
+async function findPortOwner(port: number): Promise<string> {
+  try {
+    if (process.platform === 'win32') {
+      const netstat = await runCapture('netstat', ['-ano'])
+      if (!netstat) return '未知进程'
+      for (const line of netstat.split(/\r?\n/)) {
+        const m = line.match(/\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)/i)
+        if (m && Number(m[2]) === port) {
+          const pid = m[3]
+          const tasklist = await runCapture('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])
+          const name = tasklist?.split(',')[0]?.replace(/"/g, '') ?? ''
+          return name ? `${name}（PID ${pid}）` : `PID ${pid}`
+        }
+      }
+      return '未知进程'
+    }
+    // macOS / Linux
+    const lsof = await runCapture('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'])
+    if (!lsof) return '未知进程'
+    for (const line of lsof.split(/\r?\n/).slice(1)) {
+      const m = line.match(/^\S+\s+(\d+)\s+(\S+)/)
+      if (m) return `${m[2]}（PID ${m[1]}）`
+    }
+    return '未知进程'
+  } catch {
+    return '未知进程'
+  }
+}
+
 export class HttpServer {
   private httpServer: http.Server
   private sessions = new Map<string, SessionEntry>()
@@ -70,21 +121,68 @@ export class HttpServer {
     return this.actualPort
   }
 
-  async start(preferredPort: number): Promise<number> {
+  /**
+   * 启动 HTTP 服务器。
+   *
+   * 默认「固定端口」：始终绑定 preferredPort，本地地址 http://127.0.0.1:<preferredPort>/…
+   * 跨重启保持稳定。被占用时先在同端口短重试（吸收扩展宿主重启/旧进程退出竞态），
+   * 仍失败则抛出 PortInUseError（含占用进程信息），由上层提示用户处理，绝不悄悄改地址。
+   *
+   * 仅当 fallback = true（mcpServer.portFallback）时，才按旧行为顺延到相邻端口（会改变地址）。
+   */
+  async start(preferredPort: number, fallback = false): Promise<number> {
+    const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+    // 1) 固定端口，短重试吸收竞态
     for (let attempt = 0; attempt < 5; attempt++) {
-      const port = preferredPort + attempt
+      if (attempt > 0) await delay(250)
       try {
-        await new Promise<void>((resolve, reject) => {
-          this.httpServer.listen(port, '127.0.0.1', () => resolve())
-          this.httpServer.once('error', reject)
-        })
-        this.actualPort = port
-        return port
+        await this.listen(preferredPort)
+        this.actualPort = preferredPort
+        log.info('服务器', `已固定绑定端口 ${preferredPort}（地址保持稳定）`)
+        return preferredPort
       } catch (err: unknown) {
         if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err
+        log.warn('服务器', `端口 ${preferredPort} 被占用（第 ${attempt + 1} 次尝试），稍后重试...`)
       }
     }
-    throw new Error(`无法绑定 ${preferredPort}-${preferredPort + 4} 范围内的任何端口`)
+
+    // 2) 定位占用方
+    const owner = await findPortOwner(preferredPort)
+
+    // 3) 兼容旧行为：显式开启 portFallback 时顺延端口（会改变地址）
+    if (fallback) {
+      for (let offset = 1; offset < 5; offset++) {
+        const port = preferredPort + offset
+        try {
+          await this.listen(port)
+          this.actualPort = port
+          log.warn('服务器', `端口 ${preferredPort} 被占用（${owner}），已顺延到 ${port}（mcpServer.portFallback=true）`)
+          return port
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err
+        }
+      }
+    }
+
+    throw new PortInUseError(preferredPort, owner)
+  }
+
+  /** 在指定端口上监听（成功/失败均只结算一次） */
+  private listen(port: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => {
+        this.httpServer.removeListener('listening', onListening)
+        reject(err)
+      }
+      const onListening = () => {
+        this.httpServer.removeListener('error', onError)
+        resolve()
+      }
+      this.httpServer.once('error', onError)
+      this.httpServer.once('listening', onListening)
+      this.httpServer.listen(port, '127.0.0.1')
+    })
   }
 
   async stop(): Promise<void> {

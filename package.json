@@ -2,7 +2,7 @@
   "name": "vscode-mcp-api",
   "displayName": "VS Code MCP 桥接",
   "description": "通过 MCP 将 VS Code IDE 的能力桥接给 AI 编程智能体",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "jhamama",
   "private": true,
   "engines": {
@@ -60,6 +60,44 @@
           "default": false,
           "markdownDescription": "服务器启动时自动开启 cloudflared 临时隧道（trycloudflare.com），让外网可以访问 MCP 服务器。\n\n[🚀 一键开启/关闭外网隧道](command:mcpServer.toggleTunnel) —— 服务器未运行时会先启动本地服务器；未安装 cloudflared 时会提示 **winget 自动安装 / 复制安装命令 / 复制下载直链 / 打开下载页面**。\n\n当前外网地址、「复制地址」「复制关键提示词」等操作都在「MCP 桥接面板」中：命令面板运行「VS Code MCP 桥接：打开管理面板」，或点击状态栏的 MCP 项选择「打开管理面板」。\n\n[cloudflared 官方下载页面](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) · [Windows 直链下载](https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe)\n\n也可随时点击 VS Code 状态栏的「外网隧道」按钮。"
         },
+        "mcpServer.portFallback": {
+          "type": "boolean",
+          "default": false,
+          "description": "端口被占用时自动顺延到相邻端口（会改变 MCP 地址）。默认 false：固定使用 mcpServer.port，被占用时给出明确错误提示。"
+        },
+        "mcpServer.tunnelProvider": {
+          "type": "string",
+          "enum": [
+            "cloudflare",
+            "localtunnel"
+          ],
+          "enumDescriptions": [
+            "cloudflared 隧道（默认）：临时隧道地址每次随机；配置隧道令牌/命名隧道可得到固定地址。国内连通性最好，需安装 cloudflared。",
+            "localtunnel（loca.lt）：零账号、零域名、免安装 cloudflared，可指定子域名得到固定地址；但它是免费第三方服务，稳定性与延迟不如 Cloudflare。"
+          ],
+          "default": "cloudflare",
+          "markdownDescription": "外网隧道的实现方式。\n\n- `cloudflare`：使用 cloudflared（临时隧道地址每次随机；用隧道令牌/命名隧道可固定地址）\n- `localtunnel`：使用 loca.lt，**零账号、零域名、免安装 cloudflared**，地址形如 `https://<子域名>.loca.lt/mcp` 且可固定"
+        },
+        "mcpServer.tunnelSubdomain": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "`localtunnel` 模式的固定子域名（如 `my-mcp-7f3a`），最终地址为 `https://<子域名>.loca.lt/mcp`。\n\n留空 = 扩展自动生成一个**随机**子域名并持久保存（重启不变，且不可猜测）。\n\n⚠️ loca.lt 的子域名是**公共先到先得**资源，无法真正预留：隧道断开后别人可能抢注同名子域名并劫持该地址。因此建议留空，使用自动生成的随机子域名（不可猜测 → 实际无法被抢）。"
+        },
+        "mcpServer.tunnelTokenFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**令牌隧道（推荐用于固定公网地址）**：隧道令牌的存放方式。\n\n⚠️ 令牌是敏感凭据，**绝对不要写进 settings.json**（用户设置会被 Settings Sync 同步，工作区设置会被 git 提交）。请任选一种：\n\n1. 命令面板运行「VS Code MCP 桥接：设置隧道令牌」，保存到**系统凭据库**（推荐，面板上也有按钮）；\n2. 或把令牌写入一个**仓库之外**的文件，并在此填写该文件路径（支持 `~`，适合批量/脚本部署）。\n\n启用后扩展会运行 `cloudflared tunnel run --token <令牌>`：用户端**无需 Cloudflare 账号、无需域名、无需登录**，公网地址永久固定为 `https://<mcpServer.tunnelHostname>/mcp`。需与 `mcpServer.tunnelHostname` 一起使用。"
+        },
+        "mcpServer.tunnelName": {
+          "type": "string",
+          "default": "",
+          "description": "固定公网地址的命名隧道名称（需先在 ~/.cloudflared 完成 cloudflared tunnel login / create / route dns 配置）。留空 = 使用 trycloudflare 临时隧道（公网地址每次启动都会变）。"
+        },
+        "mcpServer.tunnelHostname": {
+          "type": "string",
+          "default": "",
+          "description": "命名隧道对应的固定公网域名（如 mcp.example.com）。与 mcpServer.tunnelName 同时设置后，外网地址固定为 https://<hostname>/mcp，不再每次变化。"
+        },
         "mcpServer.terminalStrategy": {
           "type": "string",
           "enum": [
@@ -87,6 +125,14 @@
       {
         "command": "mcpServer.copyConnectionUrl",
         "title": "VS Code MCP 桥接：复制连接地址"
+      },
+      {
+        "command": "mcpServer.setTunnelToken",
+        "title": "VS Code MCP 桥接：设置隧道令牌"
+      },
+      {
+        "command": "mcpServer.clearTunnelToken",
+        "title": "VS Code MCP 桥接：清除隧道令牌"
       },
       {
         "command": "mcpServer.toggleTunnel",
@@ -120,6 +166,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
+    "localtunnel": "^2.0.2",
     "zod": "^3.23.0"
   },
   "devDependencies": {

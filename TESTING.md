@@ -35,10 +35,10 @@ curl http://127.0.0.1:3333/health
 
 **Expected response:**
 ```json
-{"status":"ok","version":"0.1.0","connectedAgents":0,"port":3333}
+{"status":"ok","version":"1.0.1","connectedAgents":0,"port":3333}
 ```
 
-If this fails, the server didn't start. Check the port setting in VS Code settings (`mcpServer.port`).
+If this fails, the server didn't start. Check the port setting in VS Code settings (`mcpServer.port`). The port is **pinned** by default: if the port is occupied the extension reports the blocking process (PID) instead of switching to a different port — resolve the conflict so the address stays fixed.
 
 ---
 

@@ -1,16 +1,35 @@
 import * as vscode from 'vscode'
+import * as os from 'os'
+import * as path from 'path'
 import { exec } from 'child_process'
+import { randomBytes } from 'crypto'
 import { VsCodeBridge } from './bridge/VsCodeBridge.js'
 import { ContextPusher } from './context/ContextPusher.js'
-import { HttpServer } from './server/HttpServer.js'
+import { HttpServer, PortInUseError } from './server/HttpServer.js'
 import { TerminalManager } from './terminal/TerminalManager.js'
 import { CloudflareTunnel, CloudflaredNotInstalledError, TunnelAbortedError } from './tunnel/CloudflareTunnel.js'
+import { LocaltunnelTunnel, LocaltunnelUnavailableError } from './tunnel/LocaltunnelTunnel.js'
 import { Settings } from './config/Settings.js'
 import { log } from './utils/logger.js'
 
 const CLOUDFLARED_DOWNLOAD_PAGE = 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/'
 const CLOUDFLARED_DIRECT_URL = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
 const WINGET_INSTALL_CMD = 'winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements'
+
+/**
+ * 隧道令牌的存放位置：VS Code 系统凭据库（SecretStorage）。
+ * 绝不写入 settings.json —— 用户设置会被 Settings Sync 同步、工作区设置会被 git 提交，
+ * 令牌一旦进仓库就等于把该用户的 VS Code 控制权公开。
+ */
+const TUNNEL_TOKEN_SECRET_KEY = 'mcpServer.tunnelToken'
+
+/** 展开路径开头的 ~（凭据文件路径通常写在用户目录下） */
+function expandHome(p: string): string {
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(os.homedir(), p.slice(1))
+  }
+  return p
+}
 
 /** 关键提示词：外网地址 + 内部使用指令，复制后直接发给远程智能体 */
 const KEY_PROMPT_INSTRUCTION = '请你连接使用这个MCP，了解里面的可以用的工具，然后接下来所有对话都需要使用MCP里面的工具进行完成'
@@ -30,6 +49,7 @@ function postPanelState(): void {
     port: httpServer?.port ?? 0,
     agents: httpServer?.connectionCount ?? 0,
     tunnelRunning: !!tunnel?.running,
+    tunnelTokenSet: !!tunnelToken,
     publicUrl,
     localUrl,
     promptText: publicUrl ? keyPrompt(publicUrl) : '',
@@ -54,6 +74,9 @@ function openPanel(): void {
     switch (msg.type) {
       case 'ready':
         postPanelState()
+        break
+      case 'setTunnelToken':
+        await vscode.commands.executeCommand('mcpServer.setTunnelToken')
         break
       case 'copyPublicUrl':
         if (tunnel?.url) {
@@ -113,6 +136,9 @@ function getPanelHtml(): string {
 <div class="row" style="margin-top:8px">
   <button id="btnCopyPrompt" style="flex:1">📋 复制关键提示词（地址 + 使用指令）</button>
 </div>
+<div class="row" style="margin-top:8px">
+  <button id="btnSetToken" class="secondary" style="flex:1">🔑 设置隧道令牌（固定公网地址用，存系统凭据库）</button>
+</div>
 <div class="prompt-preview" id="promptPreview"></div>
 
 <div class="label">本地地址（同一台电脑上的客户端使用）</div>
@@ -120,6 +146,7 @@ function getPanelHtml(): string {
   <input id="localUrl" readonly placeholder="服务器未运行">
   <button id="btnCopyLocal" class="secondary">复制</button>
 </div>
+<div class="tunnel-off">提示：本地端口默认固定为 mcpServer.port（默认 3333），重启后不变。固定公网地址有三种方式：① 设 mcpServer.tunnelProvider=localtunnel（零账号、零域名，地址固定为 https://&lt;子域名&gt;.loca.lt/mcp）；② 点上方「设置隧道令牌」+ 配置 mcpServer.tunnelHostname（令牌隧道）；③ 配置 mcpServer.tunnelName + mcpServer.tunnelHostname（自建命名隧道）。令牌保存在系统凭据库，不写入 settings.json。</div>
 
 <script>
 (function () {
@@ -131,7 +158,8 @@ function getPanelHtml(): string {
       document.getElementById('status').textContent =
         '服务器：' + (m.serverRunning ? '运行中（端口 ' + m.port + '）' : '未运行')
         + ' · 外网隧道：' + (m.tunnelRunning ? '已开启' : '未开启')
-        + ' · 已连接智能体：' + m.agents;
+        + ' · 已连接智能体：' + m.agents
+        + ' · 隧道令牌：' + (m.tunnelTokenSet ? '已设置' : '未设置');
       document.getElementById('publicUrl').value = m.publicUrl || '';
       document.getElementById('localUrl').value = m.localUrl || '';
       document.getElementById('btnCopyUrl').disabled = !m.publicUrl;
@@ -151,6 +179,7 @@ function getPanelHtml(): string {
   });
   on('btnCopyUrl', function () { vscode.postMessage({ type: 'copyPublicUrl', btn: 'btnCopyUrl' }); });
   on('btnCopyPrompt', function () { vscode.postMessage({ type: 'copyKeyPrompt', btn: 'btnCopyPrompt' }); });
+  on('btnSetToken', function () { vscode.postMessage({ type: 'setTunnelToken' }); });
   on('btnCopyLocal', function () { vscode.postMessage({ type: 'copyLocalUrl', btn: 'btnCopyLocal' }); });
   vscode.postMessage({ type: 'ready' });
 })();
@@ -164,8 +193,10 @@ let statusBarItem: vscode.StatusBarItem | undefined
 let tunnelStatusBarItem: vscode.StatusBarItem | undefined
 let contextPusher: ContextPusher | undefined
 let terminalManager: TerminalManager | undefined
-let tunnel: CloudflareTunnel | undefined
+let tunnel: CloudflareTunnel | LocaltunnelTunnel | undefined
 let panel: vscode.WebviewPanel | undefined
+/** 已解析的隧道令牌（凭据库优先，其次 tunnelTokenFile），仅驻留内存，不落任何配置文件 */
+let tunnelToken = ''
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const outputChannel = vscode.window.createOutputChannel('MCP 桥接')
@@ -207,13 +238,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Start HTTP server
   httpServer = new HttpServer(bridge, contextPusher, settings, terminalManager)
 
-  // Cloudflare 临时隧道（让外网可以访问 SSE 端点）
-  tunnel = new CloudflareTunnel()
+  // 外网隧道：由 mcpServer.tunnelProvider 选择实现（cloudflare / localtunnel）
+  function createTunnel(): CloudflareTunnel | LocaltunnelTunnel {
+    return settings.tunnelProvider === 'localtunnel' ? new LocaltunnelTunnel() : new CloudflareTunnel()
+  }
+  tunnel = createTunnel()
+
+  // localtunnel 子域名：优先用户配置；留空则自动生成随机子域名并持久化到 globalState，
+  // 使地址跨重启稳定，且子域名不可猜测（避免被抢注后劫持）。
+  const LOCALTUNNEL_SUBDOMAIN_KEY = 'mcpServer.localtunnelSubdomain'
+  /** 一次性忽略用户配置的子域名（用户在"子域名拿不到"时选择先用随机地址启动） */
+  let ignoreSubdomainOnce = false
+  function resolveLocaltunnelSubdomain(): string {
+    if (ignoreSubdomainOnce) {
+      ignoreSubdomainOnce = false
+      return ''
+    }
+    const configured = settings.tunnelSubdomain.trim()
+    if (configured) return configured
+    const cached = context.globalState.get<string>(LOCALTUNNEL_SUBDOMAIN_KEY)
+    if (cached) return cached
+    const generated = `mcp-${randomBytes(5).toString('hex')}`
+    void context.globalState.update(LOCALTUNNEL_SUBDOMAIN_KEY, generated)
+    log.info('隧道', `已生成固定 localtunnel 子域名：${generated}（持久保存，重启不变）`)
+    return generated
+  }
+
+  // 隧道令牌：优先系统凭据库（SecretStorage），其次 mcpServer.tunnelTokenFile 指定的仓库外文件。
+  // 两条路径都不经过 settings.json，避免令牌被 Settings Sync 同步或被 git 提交。
+  async function resolveTunnelToken(): Promise<string> {
+    const fromSecret = (await context.secrets.get(TUNNEL_TOKEN_SECRET_KEY))?.trim()
+    if (fromSecret) return fromSecret
+    const file = settings.tunnelTokenFile.trim()
+    if (!file) return ''
+    try {
+      const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(expandHome(file)))
+      return Buffer.from(raw).toString('utf-8').trim()
+    } catch (err) {
+      log.warn('隧道', `读取 mcpServer.tunnelTokenFile 失败（${file}）：${err}`)
+      return ''
+    }
+  }
+
+  async function refreshTunnelToken(): Promise<void> {
+    tunnelToken = await resolveTunnelToken()
+  }
+  await refreshTunnelToken()
 
   async function startServer(): Promise<void> {
     try {
       log.info('服务器', `正在端口 ${settings.port} 上启动 HTTP 服务器`)
-      const port = await httpServer!.start(settings.port)
+      const port = await httpServer!.start(settings.port, settings.portFallback)
       updateStatusBar(port, 0)
       log.info('服务器', `HTTP 服务器已在端口 ${port} 上监听`)
       vscode.window.showInformationMessage(`MCP 服务器已启动：http://127.0.0.1:${port}`)
@@ -223,7 +298,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     } catch (err) {
       log.error('服务器', 'HTTP 服务器启动失败', err)
-      vscode.window.showErrorMessage(`MCP 服务器启动失败：${err}`)
+      if (err instanceof PortInUseError) {
+        const pick = await vscode.window.showErrorMessage(
+          `MCP 服务器启动失败：${err.message}。地址固定为 http://127.0.0.1:${err.port}，需要先释放该端口才能保持地址不变。`,
+          '打开端口设置',
+          '复制占用信息',
+          '重试',
+        )
+        if (pick === '打开端口设置') {
+          await vscode.commands.executeCommand('workbench.action.openSettings', 'mcpServer.port')
+        } else if (pick === '复制占用信息') {
+          await vscode.env.clipboard.writeText(`端口 ${err.port} 被 ${err.owner} 占用（MCP 桥接）`)
+          vscode.window.showInformationMessage(`已复制占用信息：端口 ${err.port} 被 ${err.owner} 占用`)
+        } else if (pick === '重试') {
+          void startServer()
+        }
+      } else {
+        vscode.window.showErrorMessage(`MCP 服务器启动失败：${err}`)
+      }
       updateStatusBar(0, 0, true)
     }
   }
@@ -241,8 +333,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 开启外网隧道；cloudflared 未安装时引导安装（命令 / 下载链接 / 自动安装）
   function startTunnel(port: number): Promise<void> {
-    if (!tunnel) return Promise.resolve()
-    return tunnel.start(port).then(
+    const active = tunnel
+    if (!active) return Promise.resolve()
+    // 子域名只解析一次：它会消费"用随机地址"的一次性开关，重复调用会让退路失效
+    let started: Promise<string>
+    if (active instanceof LocaltunnelTunnel) {
+      const subdomain = resolveLocaltunnelSubdomain()
+      started = Promise.resolve(
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `正在建立 localtunnel 隧道${subdomain ? `（子域名 ${subdomain}）` : '（随机子域名）'}…若刚重启过，loca.lt 释放子域名约需 60 秒`,
+            cancellable: false,
+          },
+          () => active.start(port, subdomain),
+        ),
+      )
+    } else {
+      started = active.start(port, {
+        name: settings.tunnelName,
+        hostname: settings.tunnelHostname,
+        token: tunnelToken,
+      })
+    }
+    return started.then(
       (publicUrl) => {
         updateTunnelStatusBar()
         postPanelState()
@@ -268,6 +382,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         if (err instanceof CloudflaredNotInstalledError) {
           void promptCloudflaredInstall(port)
+        } else if (err instanceof LocaltunnelUnavailableError) {
+          const buttons = err.subdomainRejected ? ['用随机地址启动', '打开隧道设置'] : ['打开隧道设置']
+          void vscode.window
+            .showErrorMessage(`外网隧道启动失败：${err.message}`, ...buttons)
+            .then(async (picked) => {
+              if (picked === '用随机地址启动') {
+                // 本次临时放弃固定子域名，让 loca.lt 随机分配（地址会变，但至少隧道能用）
+                ignoreSubdomainOnce = true
+                await startTunnel(port)
+              } else if (picked === '打开隧道设置') {
+                await vscode.commands.executeCommand('workbench.action.openSettings', 'mcpServer.tunnelSubdomain')
+              }
+            })
         } else {
           vscode.window.showErrorMessage(`外网隧道启动失败：${err}`)
         }
@@ -403,6 +530,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.env.clipboard.writeText(keyPrompt(`${tunnel.url}/mcp`))
       vscode.window.showInformationMessage('已复制关键提示词（外网地址 + 使用指令），可直接发给远程智能体。')
     }),
+    // 隧道令牌：存进系统凭据库，不写 settings.json —— 开源仓库/工作区设置都不会泄露
+    vscode.commands.registerCommand('mcpServer.setTunnelToken', async () => {
+      const value = await vscode.window.showInputBox({
+        prompt: '粘贴发号方给你的隧道令牌（保存到系统凭据库，不会写入 settings.json）',
+        placeHolder: 'eyJhIjoi...（留空回车 = 清除已保存的令牌）',
+        password: true,
+        ignoreFocusOut: true,
+      })
+      if (value === undefined) return
+      const trimmed = value.trim()
+      if (trimmed) {
+        await context.secrets.store(TUNNEL_TOKEN_SECRET_KEY, trimmed)
+      } else {
+        await context.secrets.delete(TUNNEL_TOKEN_SECRET_KEY)
+      }
+      await refreshTunnelToken()
+      postPanelState()
+      vscode.window.showInformationMessage(trimmed ? '隧道令牌已保存到系统凭据库。' : '已清除隧道令牌。')
+
+      // 令牌变化后按需重启隧道以立即生效
+      if (httpServer && httpServer.port > 0) {
+        if (tunnel?.running) {
+          tunnel.stop()
+          updateTunnelStatusBar()
+        }
+        if (trimmed) {
+          await startTunnel(httpServer.port)
+        }
+      }
+    }),
+    vscode.commands.registerCommand('mcpServer.clearTunnelToken', async () => {
+      await context.secrets.delete(TUNNEL_TOKEN_SECRET_KEY)
+      await refreshTunnelToken()
+      postPanelState()
+      vscode.window.showInformationMessage('已清除系统凭据库中的隧道令牌。')
+    }),
     vscode.commands.registerCommand('mcpServer.openPanel', () => openPanel()),
     vscode.commands.registerCommand('mcpServer.toggleTunnel', async () => {
       if (!httpServer || httpServer.port === 0) {
@@ -463,7 +626,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Restart server if settings change
   context.subscriptions.push(
     settings.onChange(async () => {
+      await refreshTunnelToken()
       await stopServer()
+      // 隧道实现可能被切换（mcpServer.tunnelProvider），重建实例
+      if ((settings.tunnelProvider === 'localtunnel') !== (tunnel instanceof LocaltunnelTunnel)) {
+        tunnel?.dispose()
+        tunnel = createTunnel()
+        updateTunnelStatusBar()
+      }
       if (settings.enableContextPush) {
         contextPusher?.start()
       } else {
